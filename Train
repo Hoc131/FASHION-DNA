@@ -1,6 +1,6 @@
 1️⃣ Import thư viện
-
 Cell đầu tiên trong notebook:
+
 
 import numpy as np
 import pandas as pd
@@ -11,9 +11,11 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, models
 from PIL import Image
 from sklearn.model_selection import train_test_split
-2️⃣ Đọc dataset
 
+
+2️⃣ Đọc dataset
 Dataset của bạn nằm trong Kaggle input.
+
 
 df = pd.read_csv(
     "/kaggle/input/datasets/ndidang/deeplearningndidangdatasets/styles.csv",
