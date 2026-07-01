@@ -1,0 +1,194 @@
+1️⃣ Import thư viện
+
+Cell đầu tiên trong notebook:
+
+import numpy as np
+import pandas as pd
+import os
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms, models
+from PIL import Image
+from sklearn.model_selection import train_test_split
+2️⃣ Đọc dataset
+
+Dataset của bạn nằm trong Kaggle input.
+
+df = pd.read_csv(
+    "/kaggle/input/datasets/ndidang/deeplearningndidangdatasets/styles.csv",
+    engine="python",
+    on_bad_lines="skip"
+)
+
+df.head()
+
+
+3️⃣ Chọn label cần dùng
+Không dùng hết cột.
+
+
+df = df[["id","articleType","baseColour","season"]]
+
+
+4️⃣ Tạo đường dẫn ảnh
+
+image_folder = "/kaggle/input/datasets/ndidang/deeplearningndidangdatasets/images"
+
+df["image"] = df["id"].apply(lambda x: f"{image_folder}/{x}.jpg")
+
+
+5️⃣ Lọc ảnh lỗi
+Dataset này có vài ảnh bị thiếu
+
+df = df[df["image"].apply(os.path.exists)]
+
+6️⃣ Giảm số class (rất quan trọng)
+articleType có quá nhiều class.
+
+
+top_types = df["articleType"].value_counts().head(20).index
+df = df[df["articleType"].isin(top_types)]
+
+
+7️⃣ Encode label
+Model cần số thay vì text.
+
+
+from sklearn.preprocessing import LabelEncoder
+
+type_encoder = LabelEncoder()
+color_encoder = LabelEncoder()
+season_encoder = LabelEncoder()
+
+df["articleType"] = type_encoder.fit_transform(df["articleType"])
+df["baseColour"] = color_encoder.fit_transform(df["baseColour"])
+df["season"] = season_encoder.fit_transform(df["season"])
+
+
+8️⃣ Train / validation split
+
+train_df, val_df = train_test_split(df, test_size=0.2, random_state=42)
+
+
+9️⃣ Data augmentation
+
+transform = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor()
+])
+
+
+🔟 Tạo Dataset class
+
+
+class FashionDataset(Dataset):
+
+    def __init__(self, dataframe, transform=None):
+        self.df = dataframe
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+
+        img_path = self.df.iloc[idx]["image"]
+        image = Image.open(img_path).convert("RGB")
+
+        if self.transform:
+            image = self.transform(image)
+
+        label_type = self.df.iloc[idx]["articleType"]
+        label_color = self.df.iloc[idx]["baseColour"]
+        label_season = self.df.iloc[idx]["season"]
+
+        return image, label_type, label_color, label_season
+
+
+11️⃣ DataLoader
+
+
+train_dataset = FashionDataset(train_df, transform)
+val_dataset = FashionDataset(val_df, transform)
+
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=32)
+
+
+12️⃣ Model Fashion DNA (multi-head)
+
+
+class FashionModel(nn.Module):
+
+    def __init__(self, num_type, num_color, num_season):
+        super().__init__()
+
+        self.backbone = models.resnet50(pretrained=True)
+        self.backbone.fc = nn.Identity()
+
+        self.head_type = nn.Linear(2048, num_type)
+        self.head_color = nn.Linear(2048, num_color)
+        self.head_season = nn.Linear(2048, num_season)
+
+    def forward(self, x):
+
+        features = self.backbone(x)
+
+        type_out = self.head_type(features)
+        color_out = self.head_color(features)
+        season_out = self.head_season(features)
+
+        return type_out, color_out, season_out
+
+
+13️⃣ Khởi tạo model
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+model = FashionModel(
+    num_type=df["articleType"].nunique(),
+    num_color=df["baseColour"].nunique(),
+    num_season=df["season"].nunique()
+).to(device)
+
+
+14️⃣ Loss và optimizer
+
+
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+
+15️⃣ Training loop
+
+
+epochs = 5
+
+for epoch in range(epochs):
+
+    model.train()
+
+    for images, t, c, s in train_loader:
+
+        images = images.to(device)
+        t = t.to(device)
+        c = c.to(device)
+        s = s.to(device)
+
+        optimizer.zero_grad()
+
+        out_t, out_c, out_s = model(images)
+
+        loss = (
+            criterion(out_t, t) +
+            criterion(out_c, c) +
+            criterion(out_s, s)
+        )
+
+        loss.backward()
+        optimizer.step()
+
+    print("Epoch:", epoch, "Loss:", loss.item())
